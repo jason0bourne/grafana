@@ -17,7 +17,9 @@ import { expandRecordingRules } from './language_utils';
 import { PromQuery } from './types';
 import { DataQueryRequest, DataSourceApi, AnnotationEvent, DataQueryError } from '@grafana/ui/src/types';
 import { ExploreUrlState } from 'app/types/explore';
-import { safeStringifyValue } from 'app/core/utils/explore';
+import { safeStringifyValue, instanceOfDataQueryError } from 'app/core/utils/explore';
+import { TimeSrv } from 'app/features/dashboard/services/TimeSrv';
+import { TemplateSrv } from 'app/features/templating/template_srv';
 
 export class PrometheusDatasource implements DataSourceApi<PromQuery> {
   type: string;
@@ -36,7 +38,13 @@ export class PrometheusDatasource implements DataSourceApi<PromQuery> {
   resultTransformer: ResultTransformer;
 
   /** @ngInject */
-  constructor(instanceSettings, private $q, private backendSrv: BackendSrv, private templateSrv, private timeSrv) {
+  constructor(
+    instanceSettings,
+    private $q: angular.IQService,
+    private backendSrv: BackendSrv,
+    private templateSrv: TemplateSrv,
+    private timeSrv: TimeSrv
+  ) {
     this.type = 'prometheus';
     this.editorSrc = 'app/features/prometheus/partials/query.editor.html';
     this.name = instanceSettings.name;
@@ -127,7 +135,7 @@ export class PrometheusDatasource implements DataSourceApi<PromQuery> {
     return this.templateSrv.variableExists(target.expr);
   }
 
-  query(options: DataQueryRequest<PromQuery>) {
+  query(options: DataQueryRequest<PromQuery>): Promise<{ data: any }> {
     const start = this.getPrometheusTime(options.range.from, false);
     const end = this.getPrometheusTime(options.range.to, true);
 
@@ -147,7 +155,7 @@ export class PrometheusDatasource implements DataSourceApi<PromQuery> {
 
     // No valid targets, return the empty result to save a round trip.
     if (_.isEmpty(queries)) {
-      return this.$q.when({ data: [] });
+      return this.$q.when({ data: [] }) as Promise<{ data: any }>;
     }
 
     const allQueryPromise = _.map(queries, query => {
@@ -158,11 +166,16 @@ export class PrometheusDatasource implements DataSourceApi<PromQuery> {
       }
     });
 
-    return this.$q.all(allQueryPromise).then(responseList => {
+    const allPromise = this.$q.all(allQueryPromise).then((responseList: any) => {
       let result = [];
 
       _.each(responseList, (response, index) => {
         if (response.cancelled) {
+          return;
+        }
+
+        if (instanceOfDataQueryError(response)) {
+          result.push(response);
           return;
         }
 
@@ -184,6 +197,8 @@ export class PrometheusDatasource implements DataSourceApi<PromQuery> {
 
       return { data: result };
     });
+
+    return allPromise as Promise<{ data: any }>;
   }
 
   createQuery(target, options, start, end) {
@@ -310,7 +325,7 @@ export class PrometheusDatasource implements DataSourceApi<PromQuery> {
     error.status = err.status;
     error.statusText = err.statusText;
 
-    throw error;
+    return this.$q.resolve(error);
   };
 
   performSuggestQuery(query, cache = false) {

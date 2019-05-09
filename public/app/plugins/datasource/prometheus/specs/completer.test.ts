@@ -16,7 +16,7 @@ describe('Prometheus editor completer', () => {
   const editor = {};
 
   const backendSrv = {} as BackendSrv;
-  const datasourceStub = new PrometheusDatasource({}, {}, backendSrv, {}, {});
+  const datasourceStub = new PrometheusDatasource({}, {} as any, backendSrv, {} as any, {} as any);
 
   datasourceStub.metadataRequest = jest.fn(() =>
     Promise.resolve({ data: { data: [{ metric: { job: 'node', instance: 'localhost:9100' } }] } })
